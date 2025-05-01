@@ -1,12 +1,13 @@
 function preload() {
-  objects = loadJSON('./objects.json', 
+  objects = loadJSON('./cube.json', 
+  // objects = loadJSON('../muscles.json', 
     (data) => console.log("successfully loaded objects"), 
     (err)=>console.log("error loading objects", err));
 }
 
 function setup() {
   const width = 600;
-  const height = 400;
+  const height = 600;
   createCanvas(width, height);
   camera = {base: [[0],[0],[0]], angles: [-Math.PI/4,0,0], viewVolume: {N:0, F:width, L:-width/2, R:width/2, T:height/2, B:-height/2}}
   obj = objects.obj1;
@@ -195,21 +196,25 @@ function perspectiveProjectCoord(homoCoord3d, viewVolume) {
 
 function drawPainterly(camCoords, perspectiveFunc, fillColor=undefined) {
   let projectedCoords = camCoords.map((coord)=>perspectiveFunc(coord, camera.viewVolume));
-  const sortedPolygons = obj.faces.sort((poly1, poly2) =>
-                                          Math.max(...poly2.map(ind=>camCoords[ind][2])) - 
-                                          Math.max(...poly1.map(ind=>camCoords[ind][2]))
+  const sortedPolygons = obj.faces.sort((poly1, poly2) => {
+                                              return Math.max(...poly2.map(ind=>camCoords[ind - 1][2])) - 
+                                                     Math.max(...poly1.map(ind=>camCoords[ind - 1][2]));
+                                              //return (poly2.reduce((acc, ind)=>camCoords[ind - 1][2] + acc, 0) / poly2.length) - 
+                                              //       (poly1.reduce((acc, ind)=>camCoords[ind - 1][2] + acc, 0) / poly1.length);
+                                              }
                                         );
   let canvasCoords = projectedCoords.map((coord)=>cartToCanvasCoords(coord.slice(0, 3)).slice(0, 2))
+
   /*
   drawFace = (indices) => {
     for (let i = 0; i < indices.length; i++) {
-      line(...canvasCoords[indices[i]].map((c)=>c[0]), ...canvasCoords[indices[(i+1)%indices.length]].map((c)=>c[0]));
+      line(...canvasCoords[indices[i] - 1].map((c)=>c[0]), ...canvasCoords[indices[(i+1)%indices.length] - 1].map((c)=>c[0]));
     }
   }
   */
   drawFace = (indices) => {
       beginShape();
-      indices.forEach((ind)=>vertex(...canvasCoords[ind].map((c)=>c[0])));
+      indices.forEach((ind)=>vertex(...canvasCoords[ind - 1].map((c)=>c[0])));
       endShape(CLOSE);
     }
   
@@ -220,11 +225,11 @@ function drawPainterly(camCoords, perspectiveFunc, fillColor=undefined) {
 
   for (const polygon of sortedPolygons) {
     stroke("green");
-    strokeWeight(10);
+    strokeWeight(1);
     drawFace(polygon)
     stroke("red");
-    strokeWeight(20);
-    polygon.forEach((ind)=>point(...canvasCoords[ind].map((c)=>c[0])));
+    strokeWeight(0);
+    polygon.forEach((ind)=>point(...canvasCoords[ind - 1].map((c)=>c[0])));
   }
 
 }
