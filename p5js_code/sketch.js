@@ -39,9 +39,9 @@ function draw() {
 
   updatePixels();
   
-  let camRotate = [1, -1, 1];
-  moveCamera(camera, undefined, camRotate);
-  let objRotate = [0, 0, 0];
+  // let camRotate = [0.3, 0, 0.5];
+  // moveCamera(camera, undefined, camRotate);
+  let objRotate = [-0.3, 0, -0.5];
   drawRotatedObj(obj, objRotate);
   
   for (let y=0; y<height; y++){
@@ -307,7 +307,10 @@ function getColor(barycentric){
 }
 
 function scanlineRender(triangle, perspectiveFunc){
+  console.log(triangle)
   let projectedTri = triangle.map((coord)=>perspectiveFunc(coord, camera.viewVolume));
+  console.log(projectedTri)
+  throw new Error("stop");
   let canvasTri = projectedTri.map((coord)=>cartToCanvasCoords(coord.slice(0, 3)));
   const minX = canvasTri.reduce((acc, vertex)=>Math.min(vertex[0], acc), Infinity);
   const minY = canvasTri.reduce((acc, vertex)=>Math.min(vertex[1], acc), Infinity);
@@ -343,14 +346,12 @@ function drawRaster(camCoords, perspectiveFunc, fillColor="Black") {
 function drawRotatedObj(obj, angles) {
   let scale, base;
   ({ scale, base } = obj);
-  let worldCoords = obj.vertices.map((coord)=>modelToWorld(coord, scale, angles, base));
   obj.angles = update_angles(obj.angles, angles);
+  let worldCoords = obj.vertices.map((coord)=>modelToWorld(coord, scale, obj.angles, base));
   ({ angles, base } = camera);
   let camCoords = worldCoords.map((coord)=>worldToCamera(coord, angles, base));
-  drawRaster(camCoords, orthogonalProjectCoord, "orange");
-  // drawPainterly(camCoords, orthogonalProjectCoord, "orange");
-
-  //color vertices
+  // drawRaster(camCoords, perspectiveProjectCoord, "orange");
+  drawRaster(camCoords, perspectiveProjectCoord, "orange");
 }
 
 /*
