@@ -1,6 +1,5 @@
 function preload() {
-  objects = loadJSON('./cube.json', 
-  // objects = loadJSON('../muscles.json', 
+    objects = loadJSON('./cube.json', 
     (data) => console.log("successfully loaded objects"), 
     (err)=>console.log("error loading objects", err));
 }
@@ -13,6 +12,8 @@ function setup() {
   camera = {base: [[0],[0],[0]], angles: [-Math.PI/4,0,0], viewVolume: {N:0, F:width, L:-width/2, R:width/2, T:height/2, B:-height/2}}
   obj = objects.obj1;
   depthBuffer = Array(height).fill().map(()=>Array(width).fill(Infinity));
+  frameBuffer = Array(height).fill().map(()=>Array(width).fill([255, 255, 255]));
+
   //make each vertex homogeneous
   camera.base.push([1]);
   obj.vertices.forEach((vertex)=>vertex.push([1]));
@@ -26,11 +27,33 @@ function draw() {
   frame_num++;
 
   depthBuffer = Array(height).fill().map(()=>Array(width).fill(Infinity));
+  frameBuffer = Array(height).fill().map(()=>Array(width).fill([255, 255, 255]));
 
-  let camRotate = [0.1, -0.1, 0.1];
+  loadPixels();
+  for (let y=0; y<height; y++){
+    for (let x=0; x<width; x++){
+      const index = 4 * (y * width + x);
+      frameBuffer[y][x] = pixels.slice(index, index + 3);
+    }
+  }
+
+  updatePixels();
+  
+  let camRotate = [1, -1, 1];
   moveCamera(camera, undefined, camRotate);
   let objRotate = [0, 0, 0];
   drawRotatedObj(obj, objRotate);
+  
+  for (let y=0; y<height; y++){
+    for (let x=0; x<width; x++){
+      const index = 4 * (y * width + x);
+      pixels[index] = frameBuffer[y][x][0];
+      pixels[index + 1] = frameBuffer[y][x][1];
+      pixels[index + 2] = frameBuffer[y][x][2];
+    }
+  }
+
+  updatePixels();
   // noLoop()
 }
 
@@ -240,48 +263,47 @@ function drawPainterly(camCoords, perspectiveFunc, fillColor=undefined) {
   }
 }
 
-
-function sameSide(p1,p2,a,b){
-  const p1_vec = createVector(...p1)
-  const p2_vec = createVector(...p2)
-  const a_vec = createVector(...a);
-  const b_vec = createVector(...b);
-  const c_prod1 = (p5.Vector.sub(b_vec, a_vec)).cross(p5.Vector.sub(p1_vec, a_vec));
-  const c_prod2 = (p5.Vector.sub(b_vec, a_vec)).cross(p5.Vector.sub(p2_vec, a_vec));
-  if (c_prod1.dot(c_prod2) >= 0)
-    return true;
-  else 
-    return false;
-}
-
 function flatten_vector(vec){
   return vec.map(coord=>coord[0]);
 }
 
-function pointInTriangle(triangle, point){
-  //assumes point is 2d
-  const [a, b, c] = triangle.map(vert=>flatten_vector(vert).slice(0,2));
-  const p = flatten_vector(point)
-  if (sameSide(p,a,b,c) && sameSide(p,b,a,c)
-      && sameSide(p,c,a,b))
-    return true;
-  else 
-    return false;
+function getDepth(triangle, barycentric){
+  const [m2, m3] = barycentric
+  const depth = triangle[0][2][0] * (1 - m2 - m3) + triangle[1][2][0] * m2 + triangle[2][2][0] * m3;
+  return depth;
 }
 
-function getDepth(triangle, point){
-  //assumes point is 2d and in triangle projection
-  const [a, b, c] = triangle.map(vec=>createVector(...flatten_vector(vec.slice(0, 3))))
-  const p = createVector(...flatten_vector(point));
-  const ab = p5.Vector.sub(b, a);
-  const ac = p5.Vector.sub(c, a);
-  const norm = p5.Vector.cross(ab, ac);
-  if (norm.z == 0)
-    throw new Error("triangle is degenerate");
-  //using equation of plane
-  const d = -(norm.x * a.x + norm.y * a.y + norm.z * a.z);
-  const depth = -(norm.x * p.x + norm.y * p.y + d) / norm.z;
-  return depth;
+function inverseMatrix2d(mat){
+  const det = mat[0][0] * mat[1][1] - mat[0][1] * mat[1][0];
+  return [[mat[1][1] / det, -mat[0][1] / det], [-mat[1][0] / det, mat[0][0] / det]];
+}
+
+function getBarycentric(triangle, point){
+  const diff = [[point[0][0] - triangle[0][0]], [point[1][0] - triangle[0][1]]];
+  const mat = [
+    [triangle[1][0] - triangle[0][0], triangle[2][0] - triangle[0][0]],
+    [triangle[1][1] - triangle[0][1], triangle[2][1] - triangle[0][1]]
+  ];
+  return flatten_vector(matMultiply(inverseMatrix2d(mat), diff));
+} 
+
+function isValidBarycentric(barycentric){
+  const [m2, m3] = barycentric;
+  return (m2 >= 0 && m3 >= 0 && m2 + m3 <= 1);
+}
+
+function getColor(barycentric){
+  colors = [[255,255,0], [255,0,0], [0,255,0]];
+  const [m2, m3] = barycentric;
+  const m1 = 1 - m2 - m3;
+  if ((m1 <1e-2) || (m2 <1e-2) || (m3 <1e-2))
+    return [0, 0, 0];
+  else {
+    const r = Math.floor(colors[0][0] * m1 + colors[1][0] * m2 + colors[2][0] * m3);
+    const g = Math.floor(colors[0][1] * m1 + colors[1][1] * m2 + colors[2][1] * m3);
+    const b = Math.floor(colors[0][2] * m1 + colors[1][2] * m2 + colors[2][2] * m3);
+    return [r, g, b];
+  }
 }
 
 function scanlineRender(triangle, perspectiveFunc){
@@ -292,19 +314,18 @@ function scanlineRender(triangle, perspectiveFunc){
   const maxX = canvasTri.reduce((acc, vertex)=>Math.max(vertex[0], acc), -Infinity);
   const maxY = canvasTri.reduce((acc, vertex)=>Math.max(vertex[1], acc), -Infinity);
 
-  // console.log(canvasTri.map(vert=>vert.map(coord=>coord[0])), minX, minY, maxX, maxY);
-  // console.log(Math.max(0, Math.floor(minX)), Math.min(width - 1, Math.floor(maxX)), Math.max(0, Math.floor(minY)), Math.min(height - 1, Math.floor(maxY)))
   for (let y=Math.max(0, Math.floor(minY)); y <= Math.min(height - 1, Math.floor(maxY)); y++){
     for (let x=Math.max(0, Math.floor(minX)); x <= Math.min(width - 1, Math.floor(maxX)); x++){
       //add depth
       for (let i = 0; i < 3; i++)
         canvasTri[i][2][0] = triangle[i][2][0]
       const point = [[x + 0.5], [y + 0.5]];
-      if (pointInTriangle(canvasTri, point)){
-        const pointDepth = getDepth(canvasTri, point);
+      const barycentric = getBarycentric(canvasTri, point);
+      if (isValidBarycentric(barycentric)){
+        // const pointDepth = getDepth(canvasTri, point);
+        const pointDepth = getDepth(canvasTri, barycentric);
         if (depthBuffer[y][x] >= pointDepth){
-          //fill pixel
-          square(x, y, 1);
+          frameBuffer[y][x] = getColor(barycentric);
           depthBuffer[y][x] = pointDepth;
         }
       }

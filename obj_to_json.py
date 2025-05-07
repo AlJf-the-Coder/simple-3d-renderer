@@ -2,8 +2,6 @@ import sys
 import json
 
 
-
-'''
 filename = sys.argv[1]
 width = int(sys.argv[2])
 
@@ -53,13 +51,4 @@ assert all(map(lambda face: len(face) >= 3, faces)), "some faces only have 2 poi
 
 with open("objects.json", "w") as f:
     json.dump(object, f)
-'''
-
-with open("p5js_code/cube.json", "r") as f:
-    cube = json.load(f)
-    for i in range(len(cube["obj1"]["faces"])):
-        cube["obj1"]["faces"][i] = list(map(lambda ind: ind + 1, cube["obj1"]["faces"][i]))
-
-with open("p5js_code/cube.json", "w") as f:
-    json.dump(cube, f)
 

@@ -1,4 +1,7 @@
 *.txt
 *.exe
 *.json
+*.docx
+models/
+cpu_renderer/
 play.js
