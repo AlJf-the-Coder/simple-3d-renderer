@@ -105,46 +105,41 @@ vector<Matrix> transformObjectCoordinates(utilities::object &obj, array<float, 3
     float scale = obj.scale;
     Matrix base = obj.base;
     updateAngles(obj.angles, angles);
-    vector<Matrix> worldCoords;
+    vector<Matrix> transformedCoords;
+    transformedCoords.reserve(obj.vertices.size());
     for (Matrix coord : obj.vertices){
-        worldCoords.push_back(modelToWorld(coord, scale, obj.angles, base));
+        transformedCoords.push_back(modelToWorld(coord, scale, obj.angles, base));
     }
-    angles = camera.angles;
-    base = camera.base;
-    vector<Matrix> camCoords;
-    for (Matrix worldCoord : worldCoords){
-        camCoords.push_back(worldToCamera(worldCoord, angles, base));
+
+    for (Matrix& transformedCoord : transformedCoords){
+        transformedCoord = worldToCamera(transformedCoord, camera.angles, camera.base);
     }
 
     float near = camera.viewVolume.N;
-    float minZ = camCoords[0][2][0];
-    for (Matrix camCoord: camCoords){
-        minZ = fminf(minZ, camCoord[2][0]);
+    float minZ = transformedCoords[0][2][0];
+    for (Matrix transformedCoord: transformedCoords){
+        minZ = fminf(minZ, transformedCoord[2][0]);
     }
 
     array<float, 3> offsetVector = {0.0f, 0.0f, near - minZ};
 
-    vector<Matrix> shiftedCoords;
-    for (Matrix camCoord: camCoords){
-        shiftedCoords.push_back(translateCoord(camCoord, offsetVector));
+    for (Matrix& t: transformedCoords){
+        t = translateCoord(t, offsetVector);
     }
 
-    vector<Matrix> projectedCoords;
-    for (Matrix shiftedCoord: shiftedCoords){
-        projectedCoords.push_back(perspectiveFunc(shiftedCoord, camera.viewVolume));
+    for (Matrix& t: transformedCoords){
+        t = perspectiveFunc(t, camera.viewVolume);
     }
 
-    vector<Matrix> fullCoords;
-    for (Matrix projectedCoord: projectedCoords){
-        fullCoords.push_back(canonicalToFullCoords(projectedCoord, camera.viewVolume));
+    for (Matrix& t: transformedCoords){
+        t = canonicalToFullCoords(t, camera.viewVolume);
     }
 
-    vector<Matrix> canvasCoords;
-    for (Matrix fullCoord: fullCoords){
-        canvasCoords.push_back(cartToCanvasCoords(fullCoord));
+    for (Matrix& t: transformedCoords){
+        t = cartToCanvasCoords(t);
     }
 
-    return canvasCoords;
+    return transformedCoords;
 }
 
 /* This function runs once at startup. */
