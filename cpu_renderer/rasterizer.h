@@ -11,7 +11,7 @@
 
 #define PI 3.14159265358979323846
 
-#define WINDOW_WIDTH 400
+#define WINDOW_WIDTH 500
 #define WINDOW_HEIGHT WINDOW_WIDTH
 
 using FrameBuffer = std::array<std::array<std::array<uint8_t, 3>, WINDOW_WIDTH>, WINDOW_HEIGHT>;
@@ -102,10 +102,25 @@ void loadObject(const char *filename, utilities::object &obj)
         else if (type == "f")
         {
             std::array<int, 3> face;
-            iss >> face[0] >> face[1] >> face[2];
+            for (int i=0; i < 3; i++)
+            {
+                std::string vertex;
+                iss >> vertex;
+                size_t pos = vertex.find('/');
+                if (pos != std::string::npos)
+                {
+                    face[i] = std::stoi(vertex.substr(0, pos));
+                }
+                else
+                {
+                    face[i] = std::stoi(vertex);
+                }
+            }
             obj.faces.push_back(face);
-            // std::array<std::array<uint8_t, 3>, 3> colors = {{255, 255, 0}, {255, 255, 0}, {255, 255, 0}};
-            std::array<std::array<uint8_t, 3>, 3> colors = {{{255, 255, 0}, {255, 255, 0}, {255, 255, 0}}};
+
+            //Default color for each face
+            // std::array<std::array<uint8_t, 3>, 3> colors = {{{255, 255, 0}, {255, 255, 0}, {255, 255, 0}}};
+            std::array<std::array<uint8_t, 3>, 3> colors = {{{255,255,0}, {255,0,0}, {0,255,0}}};
             obj.colors.push_back(colors);
         }
     }

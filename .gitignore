@@ -3,4 +3,5 @@
 *.json
 *.docx
 models/
+output/*
 play.js
