@@ -177,7 +177,7 @@ Matrix modelToWorld(Matrix homoCoord3d, float scale, std::array<float, 3> angles
         return {};
     }
     std::array<float, 3> flatBase = {base[0][0], base[1][0], base[2][0]};
-    Matrix worldCoord = transformCoord(homoCoord3d, {{rotateCoord,angles}, {translateCoord,flatBase}, {scaleCoord,scale}});
+    Matrix worldCoord = transformCoord(homoCoord3d, {{rotateCoord,angles}, {scaleCoord,scale}, {translateCoord,flatBase}});
     return worldCoord;
 }
 

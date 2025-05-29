@@ -18,6 +18,7 @@ static Uint64 frameNum = 0;
 
 FrameBuffer frameBuffer;
 DepthBuffer depthBuffer;
+vector<uint8_t> pixelBuffer;
 utilities::camera camera;
 utilities::object obj;
 
@@ -27,7 +28,10 @@ void resetBuffers(std::array<uint8_t, 3> color) {
     {
         for (int j = 0; j < WINDOW_WIDTH; j++)
         {
-            frameBuffer[i][j] = color;
+            int index = 3 * (i * WINDOW_WIDTH + j);
+            frameBuffer[index + 0] = color[0];
+            frameBuffer[index + 1] = color[1];
+            frameBuffer[index + 2] = color[2];
             depthBuffer[i][j] = 1.0f;
         }
     }
@@ -75,10 +79,10 @@ int scanlineRender(array<Matrix, 3> triangle, array<array<uint8_t, 3>, 3> triCol
                 float pointDepth = getDepth(triangle, barycentric);
                 if (pointDepth >= 0 && pointDepth <= 1 && pointDepth <= depthBuffer[y][x]){
                     array<uint8_t, 3> color = getColor(barycentric, triColors);
-                    for (int i=0; i<3; i++){
-                        color[i] = floor((1-pointDepth)*color[i]);
-                    }
-                    frameBuffer[y][x] = color;
+                    int index = 3 * (y * WINDOW_WIDTH + x);
+                    frameBuffer[index + 0] = floor((1-pointDepth)*color[0]);
+                    frameBuffer[index + 1] = floor((1-pointDepth)*color[1]);
+                    frameBuffer[index + 2] = floor((1-pointDepth)*color[2]);
                     depthBuffer[y][x] = pointDepth;
                 }
             }
@@ -111,14 +115,14 @@ vector<Matrix> transformObjectCoordinates(utilities::object &obj, array<float, 3
         transformedCoords.push_back(modelToWorld(coord, scale, obj.angles, base));
     }
 
-    for (Matrix& transformedCoord : transformedCoords){
-        transformedCoord = worldToCamera(transformedCoord, camera.angles, camera.base);
+    for (Matrix& t: transformedCoords){
+        t = worldToCamera(t, camera.angles, camera.base);
     }
 
     float near = camera.viewVolume.N;
     float minZ = transformedCoords[0][2][0];
-    for (Matrix transformedCoord: transformedCoords){
-        minZ = fminf(minZ, transformedCoord[2][0]);
+    for (Matrix t: transformedCoords){
+        minZ = fminf(minZ, t[2][0]);
     }
 
     array<float, 3> offsetVector = {0.0f, 0.0f, near - minZ};
@@ -145,7 +149,7 @@ vector<Matrix> transformObjectCoordinates(utilities::object &obj, array<float, 3
 /* This function runs once at startup. */
 SDL_AppResult SDL_AppInit(void **appstate, int argc, char *argv[])
 {
-    SDL_Log("Initializing\n");
+    cout << "Initializing" << "\n";
 
     float near = WINDOW_WIDTH;
     initCamera(camera, {near, near + WINDOW_WIDTH, -WINDOW_WIDTH/2, WINDOW_WIDTH/2, WINDOW_HEIGHT/2, -WINDOW_HEIGHT/2});
@@ -156,23 +160,22 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char *argv[])
             loadObject(argv[1], obj);
     }
     catch (const std::exception &e) {
-        SDL_Log("Error loading object");
         cerr << "Error loading object: " << e.what() << endl;
         return SDL_APP_FAILURE;
     }
 
-    SDL_Log("Loaded object with %d vertices and %d faces\n", obj.vertices.size(), obj.faces.size());
-    cout << "Object has " << obj.vertices.size() << " vertices and " << obj.faces.size() << " faces" << endl;
+    cerr << "Loaded object" << "\n";
+    cout << "Object has " << obj.vertices.size() << " vertices and " << obj.faces.size() << " faces" << "\n";
 
     SDL_SetAppMetadata("Simple 3D Renderer", "1.0", "com.example.renderer-points");
 
     if (!SDL_Init(SDL_INIT_VIDEO)) {
-        SDL_Log("Couldn't initialize SDL: %s", SDL_GetError());
+        cerr << "Couldn't initialize SDL: " << SDL_GetError() << endl;
         return SDL_APP_FAILURE;
     }
 
     if (!SDL_CreateWindowAndRenderer("Test Renderer", WINDOW_WIDTH, WINDOW_HEIGHT, 0, &window, &renderer)) {
-        SDL_Log("Couldn't create window/renderer: %s", SDL_GetError());
+        cerr << "Couldn't create window/renderer: " << SDL_GetError() << endl;
         return SDL_APP_FAILURE;
     }
 
@@ -199,24 +202,38 @@ SDL_AppResult SDL_AppIterate(void *appstate)
     const int pixelCount = rasterize(canvasCoords, obj);
     // drawWireframe(canvasCoords, {0, 255, 0});
 
-    for (int y=0; y<WINDOW_HEIGHT; y++){
-        for (int x=0; x<WINDOW_WIDTH; x++){
-            int index = 4 * (y * WINDOW_WIDTH + x);
-            auto [r,g,b] = frameBuffer[y][x];
-            SDL_SetRenderDrawColor(renderer, r, g, b, SDL_ALPHA_OPAQUE);
-            SDL_RenderPoint(renderer, x, y);
-            // pixels[index] = frameBuffer[y][x][0];
-            // pixels[index + 1] = frameBuffer[y][x][1];
-            // pixels[index + 2] = frameBuffer[y][x][2];
-        }
-    }
+    // for (int y=0; y<WINDOW_HEIGHT; y++){
+    //     for (int x=0; x<WINDOW_WIDTH; x++){
+    //         int index = 4 * (y * WINDOW_WIDTH + x);
+    //         auto [r,g,b] = frameBuffer[y][x];
+    //         SDL_SetRenderDrawColor(renderer, r, g, b, SDL_ALPHA_OPAQUE);
+    //         SDL_RenderPoint(renderer, x, y);
+    //     }
+    // }
 
+    // SDL_Surface *surface = SDL_RenderReadPixels(renderer, NULL);
+    
     //save the frame
-    SDL_Surface *surface = SDL_RenderReadPixels(renderer, NULL);
+    SDL_Surface* surface = SDL_CreateSurfaceFrom(
+        WINDOW_WIDTH, WINDOW_HEIGHT,
+        SDL_PIXELFORMAT_RGB24, frameBuffer.data(), WINDOW_WIDTH * 3 
+    );
     if (surface == NULL) {
         SDL_Log("Couldn't read pixels from renderer: %s", SDL_GetError());
         return SDL_APP_FAILURE;
     }
+
+    // Convert the surface to a texture
+    SDL_Texture* texture = SDL_CreateTextureFromSurface(renderer, surface);
+    if (texture == NULL) {
+        SDL_Log("Couldn't create texture: %s", SDL_GetError());
+        SDL_DestroySurface(surface);
+        return SDL_APP_FAILURE;
+    }
+
+    // Render the texture to the screen
+    SDL_RenderTexture(renderer, texture, NULL, NULL);
+    SDL_RenderPresent(renderer);
 
     const string fileString = "../../output/frame_" + to_string(frameNum) + ".png";
     const char *fileName = fileString.c_str();
@@ -227,7 +244,6 @@ SDL_AppResult SDL_AppIterate(void *appstate)
     }
 
     SDL_DestroySurface(surface);
-    SDL_RenderPresent(renderer);  /* put it all on the screen! */
 
     //store metrics in log file
     const Uint64 now = SDL_GetPerformanceCounter();

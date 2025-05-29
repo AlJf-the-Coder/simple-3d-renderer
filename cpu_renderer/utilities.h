@@ -2,6 +2,7 @@
 #include <array> 
 #include <vector>
 #include <cstdint>
+#include <stdexcept>
 #include <functional>
 
 #define PI 3.14159265358979323846
@@ -9,7 +10,7 @@
 #define WINDOW_WIDTH 500
 #define WINDOW_HEIGHT WINDOW_WIDTH
 
-using FrameBuffer = std::array<std::array<std::array<uint8_t, 3>, WINDOW_WIDTH>, WINDOW_HEIGHT>;
+using FrameBuffer = std::array<uint8_t, 3 * WINDOW_WIDTH * WINDOW_HEIGHT>;
 using DepthBuffer = std::array<std::array<float, WINDOW_WIDTH>, WINDOW_HEIGHT>;
 using Matrix = std::vector<std::vector<float>>;
 
@@ -50,37 +51,13 @@ namespace utilities{
 using PerspectiveFunc = std::function<Matrix(Matrix, utilities::viewVolume)>;
 using TransformFunc= std::function<Matrix(const Matrix, const std::any)>;
 
-float getScaleFactor(utilities::object obj)
-{
-    float maxX = obj.vertices[0][0][0];
-    float minX = obj.vertices[0][0][0];
-    float maxY = obj.vertices[0][1][0];
-    float minY = obj.vertices[0][1][0];
-    float maxZ = obj.vertices[0][2][0];
-    float minZ = obj.vertices[0][2][0];
-    for (Matrix vertex: obj.vertices){
-        maxX = fmaxf(maxX, vertex[0][0]);
-        minX = fminf(minX, vertex[0][0]);
-        maxY = fmaxf(maxY, vertex[1][0]);
-        minY = fminf(minY, vertex[1][0]);
-        maxZ = fmaxf(maxZ, vertex[2][0]);
-        minZ = fminf(minZ, vertex[2][0]);
-    }
-    float dx = maxX - minX;
-    float dy = maxY - minY;
-    float dz = maxZ - minZ;
-    float diagonal = sqrt(dx*dx + dy*dy + dz*dz);
-    float screenDiagonal = sqrt(WINDOW_WIDTH * WINDOW_WIDTH + WINDOW_HEIGHT * WINDOW_HEIGHT);
-    return screenDiagonal / diagonal * 0.8f; // Add a margin;
-}
-
 void loadObject(const char *filename, utilities::object &obj)
 {
     std::ifstream file(filename);
     if (!file.is_open())
     {
         std::cerr << "Error opening file: " << filename << std::endl;
-        return;
+        throw std::runtime_error(std::string("Error opening file: ") + filename);
     }
     std::string line;
     while (std::getline(file, line))
@@ -121,7 +98,37 @@ void loadObject(const char *filename, utilities::object &obj)
     }
     file.close();
 
-    obj.scale = getScaleFactor(obj);
+    float maxX = obj.vertices[0][0][0];
+    float minX = obj.vertices[0][0][0];
+    float maxY = obj.vertices[0][1][0];
+    float minY = obj.vertices[0][1][0];
+    float maxZ = obj.vertices[0][2][0];
+    float minZ = obj.vertices[0][2][0];
+    for (Matrix vertex: obj.vertices){
+        maxX = fmaxf(maxX, vertex[0][0]);
+        minX = fminf(minX, vertex[0][0]);
+        maxY = fmaxf(maxY, vertex[1][0]);
+        minY = fminf(minY, vertex[1][0]);
+        maxZ = fmaxf(maxZ, vertex[2][0]);
+        minZ = fminf(minZ, vertex[2][0]);
+    }
+    float dx = maxX - minX;
+    float dy = maxY - minY;
+    float dz = maxZ - minZ;
+    float diagonal = sqrt(dx*dx + dy*dy + dz*dz);
+    float screenDiagonal = sqrt(WINDOW_WIDTH * WINDOW_WIDTH + WINDOW_HEIGHT * WINDOW_HEIGHT);
+    obj.scale = screenDiagonal / diagonal * 0.9f;
+    std::array <float, 3> center = {
+        minX + dx / 2,
+        minY + dy / 2,
+        minZ + dz / 2
+    };
+    for (Matrix &vertex : obj.vertices) {
+        vertex[0][0] -= center[0];
+        vertex[1][0] -= center[1];
+        vertex[2][0] -= center[2];
+        vertex[3][0] = 1.0f; // Ensure homogeneous coordinate
+    }
     obj.base = {
         {0.0f},
         {0.0f},
