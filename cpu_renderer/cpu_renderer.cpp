@@ -5,6 +5,7 @@
 #include <SDL3/SDL_surface.h>
 #include <SDL3/SDL_video.h>
 #include "rasterizer.h"
+#include <iomanip>
 
 using namespace std;
 
@@ -196,37 +197,25 @@ SDL_AppResult SDL_AppIterate(void *appstate)
     lastTime = SDL_GetPerformanceCounter();
     resetBuffers({0, 255, 255});  /* clear the frame buffer. */
     array<float, 3> objRotate = {-0.03f, 0.0f, -0.053f};
-    //TODO: make it so all pixels are rendered at once
-    // drawRotatedObject(obj, objRotate, orthographicProjectCoord);
+
     vector<Matrix> canvasCoords = transformObjectCoordinates(obj, objRotate, perspectiveProjectCoord);
     const int pixelCount = rasterize(canvasCoords, obj);
     // drawWireframe(canvasCoords, {0, 255, 0});
 
-    // for (int y=0; y<WINDOW_HEIGHT; y++){
-    //     for (int x=0; x<WINDOW_WIDTH; x++){
-    //         int index = 4 * (y * WINDOW_WIDTH + x);
-    //         auto [r,g,b] = frameBuffer[y][x];
-    //         SDL_SetRenderDrawColor(renderer, r, g, b, SDL_ALPHA_OPAQUE);
-    //         SDL_RenderPoint(renderer, x, y);
-    //     }
-    // }
-
-    // SDL_Surface *surface = SDL_RenderReadPixels(renderer, NULL);
-    
     //save the frame
     SDL_Surface* surface = SDL_CreateSurfaceFrom(
         WINDOW_WIDTH, WINDOW_HEIGHT,
         SDL_PIXELFORMAT_RGB24, frameBuffer.data(), WINDOW_WIDTH * 3 
     );
     if (surface == NULL) {
-        SDL_Log("Couldn't read pixels from renderer: %s", SDL_GetError());
+        cerr << "Couldn't read pixels from renderer: " << SDL_GetError() << endl;
         return SDL_APP_FAILURE;
     }
 
     // Convert the surface to a texture
     SDL_Texture* texture = SDL_CreateTextureFromSurface(renderer, surface);
     if (texture == NULL) {
-        SDL_Log("Couldn't create texture: %s", SDL_GetError());
+        cerr << "Couldn't create texture: s" << SDL_GetError() << endl;
         SDL_DestroySurface(surface);
         return SDL_APP_FAILURE;
     }
@@ -240,7 +229,7 @@ SDL_AppResult SDL_AppIterate(void *appstate)
 
     if (!IMG_SavePNG(surface, fileName)){
         SDL_DestroySurface(surface);
-        SDL_Log("Couldn't save image: %s", SDL_GetError());
+        cerr << "Couldn't save image: " << SDL_GetError() << endl;
     }
 
     SDL_DestroySurface(surface);
@@ -251,20 +240,18 @@ SDL_AppResult SDL_AppIterate(void *appstate)
     totalTime += elapsed;
     totalPixels += pixelCount;
 
-
-    SDL_Log("Frame %llu, Time: %f, Pixels: %d", frameNum, elapsed, pixelCount);
     cout << "frameNum: " << frameNum << " "
      << "time: " << elapsed << " " 
      << "pixels: " << pixelCount << endl;
     frameNum++;
 
     if (frameNum >= 10) {
-        SDL_Log("Total time: %f", totalTime);
         double frameTime = totalTime / frameNum;
-        SDL_Log("Exiting after %d frames", frameNum);
-        SDL_Log("Average pixels per frame: %.4f", (float) totalPixels / frameNum);
-        SDL_Log("Average processing time: %.4f", frameTime);
-        SDL_Log("Frame rate: %.4f", 1.0 / (frameTime / 1000));
+        cout << "Total time: " << totalTime << endl;
+        cout << "Exiting after " << frameNum << " frames" << endl;
+        cout << "Average pixels per frame: " << std::fixed << std::setprecision(4) << (float) totalPixels / frameNum << endl;
+        cout << "Average processing time: " << std::fixed << std::setprecision(4) << frameTime << endl;
+        cout << "Frame rate: " << std::fixed << std::setprecision(4) << (1.0 / (frameTime / 1000)) << endl;
         return SDL_APP_SUCCESS;  /* end the program, reporting success to the OS. */
     }
     return SDL_APP_CONTINUE;  /* carry on with the program! */
