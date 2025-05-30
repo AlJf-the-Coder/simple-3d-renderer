@@ -1,5 +1,8 @@
 #include <iostream>
+#include <array>
+#include <vector>
 #include <cstdint>
+#include <stdexcept>
 #include <cuda_runtime.h>
 
 #define PI 3.14159265358979323846
@@ -65,46 +68,11 @@ namespace utilities{
         float3 angles;
     };
 
-    struct GPUObject {
-        Vec4* vertices;
-        int* faces;
-        Color* colors;
-        int numVertices;
-        int numFaces;
-        float scale;
-        Vec3 base;
-        float3 angles;
-    };
-
     struct light {
         Vec3 base;
         float3 angles;
     };
 
-}
-
-float getScaleFactor(utilities::object obj)
-{
-    float maxX = obj.vertices[0].x;
-    float minX = obj.vertices[0].x;
-    float maxY = obj.vertices[0].y;
-    float minY = obj.vertices[0].y;
-    float maxZ = obj.vertices[0].z;
-    float minZ = obj.vertices[0].z;
-    for (Matrix vertex: obj.vertices){
-        maxX = fmaxf(maxX, vertex.x);
-        minX = fminf(minX, vertex.x);
-        maxY = fmaxf(maxY, vertex.y);
-        minY = fminf(minY, vertex.y);
-        maxZ = fmaxf(maxZ, vertex.z);
-        minZ = fminf(minZ, vertex.z);
-    }
-    float dx = maxX - minX;
-    float dy = maxY - minY;
-    float dz = maxZ - minZ;
-    float diagonal = sqrt(dx*dx + dy*dy + dz*dz);
-    float screenDiagonal = sqrt(WINDOW_WIDTH * WINDOW_WIDTH + WINDOW_HEIGHT * WINDOW_HEIGHT);
-    return screenDiagonal / diagonal * 0.8f; // Add a margin;
 }
 
 void loadObject(const char *filename, utilities::object &obj)
@@ -156,7 +124,37 @@ void loadObject(const char *filename, utilities::object &obj)
     }
     file.close();
 
-    obj.scale = getScaleFactor(obj);
+    float maxX = obj.vertices[0].x;
+    float minX = obj.vertices[0].x;
+    float maxY = obj.vertices[0].y;
+    float minY = obj.vertices[0].y;
+    float maxZ = obj.vertices[0].z;
+    float minZ = obj.vertices[0].z;
+    for (Vec4 vertex: obj.vertices){
+        maxX = fmaxf(maxX, vertex.x);
+        minX = fminf(minX, vertex.x);
+        maxY = fmaxf(maxY, vertex.y);
+        minY = fminf(minY, vertex.y);
+        maxZ = fmaxf(maxZ, vertex.z);
+        minZ = fminf(minZ, vertex.z);
+    }
+    float dx = maxX - minX;
+    float dy = maxY - minY;
+    float dz = maxZ - minZ;
+    float diagonal = sqrt(dx*dx + dy*dy + dz*dz);
+    float screenDiagonal = sqrt(WINDOW_WIDTH * WINDOW_WIDTH + WINDOW_HEIGHT * WINDOW_HEIGHT);
+    obj.scale = screenDiagonal / diagonal * 0.9f;
+    std::array <float, 3> center = {
+        minX + dx / 2,
+        minY + dy / 2,
+        minZ + dz / 2
+    };
+    //Translate vertices to center
+    for (Vec4 &vertex : obj.vertices) {
+        vertex.x -= center[0];
+        vertex.y -= center[1];
+        vertex.z -= center[2];
+    }
     obj.base = {
         {0.0f},
         {0.0f},
