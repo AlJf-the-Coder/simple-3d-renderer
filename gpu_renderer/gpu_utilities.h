@@ -1,8 +1,10 @@
-#include <iostream>
+#pragma once    
+
 #include <array>
 #include <vector>
 #include <cstdint>
 #include <stdexcept>
+#include <math.h>
 #include <cuda_runtime.h>
 
 #define PI 3.14159265358979323846
@@ -13,7 +15,6 @@
 // WIDTH x HEIGHT
 using FrameBuffer =  uint8_t*;
 using DepthBuffer = float*;
-
 
 struct Mat4 {
     float4 rows[4];
@@ -29,16 +30,23 @@ struct Mat4 {
 
 typedef float4 Vec4;
 typedef float3 Vec3;
-typedef uchar3 Color
+typedef uchar3 Color;
 
-struct ExtractZ {
+struct minZUnary{
     __host__ __device__
     float operator()(const Vec4& v) const { return v.z; }
-}
+};
+
+struct minZBinary {
+    __host__ __device__
+    float operator()(const float z1, const float z2) const { return fminf(z1, z2); }
+};
 
 namespace utilities{
     struct boundingBox {
-        float minX, maxX, minY, maxY, minZ, maxZ;
+        float minX, maxX, 
+        minY, maxY, 
+        minZ, maxZ;
     };
 
     struct viewVolume
@@ -73,125 +81,55 @@ namespace utilities{
         float3 angles;
     };
 
+    void loadObject(const char *filename, object &obj);
+
+    void initCamera(utilities::camera &cam, const utilities::viewVolume &viewVol)
+
+    void initLight(utilities::light &light)
 }
 
-void loadObject(const char *filename, utilities::object &obj)
-{
-    std::ifstream file(filename);
-    if (!file.is_open())
-    {
-        std::cerr << "Error opening file: " << filename << std::endl;
-        return;
-    }
-    std::string line;
-    while (std::getline(file, line))
-    {
-        std::istringstream iss(line);
-        std::string type;
-        iss >> type;
-        if (type == "v")
-        {
-            Vec4 vertex;
-            iss >> vertex.x >> vertex.y >> vertex.z;
-            vertex.w = 1;
-            obj.vertices.push_back(vertex);
-        }
-        else if (type == "f")
-        {
-            int face;
-            for (int i=0; i < 3; i++)
-            {
-                std::string vertex;
-                iss >> vertex;
-                size_t pos = vertex.find('/');
-                if (pos != std::string::npos)
-                {
-                    face = std::stoi(vertex.substr(0, pos));
-                }
-                else
-                {
-                    face = std::stoi(vertex);
-                }
-                obj.faces.push_back(face)
-            }
+__host__ __device__ Vec4 vectorMultiply(const Mat4 a, const Vec4 b);
 
-            //Default color for each face
-            // {{{255,255,0}, {255,0,0}, {0,255,0}}};
-            obj.colors.push_back(make_uchar3(255, 255, 0));
-            obj.colors.push_back(make_uchar3(255, 0, 0));
-            obj.colors.push_back(make_uchar3(0, 255, 0)); 
-        }
-    }
-    file.close();
+__device__ Mat4 matrixMultiply(const Mat4 a, const Mat4 b);
 
-    float maxX = obj.vertices[0].x;
-    float minX = obj.vertices[0].x;
-    float maxY = obj.vertices[0].y;
-    float minY = obj.vertices[0].y;
-    float maxZ = obj.vertices[0].z;
-    float minZ = obj.vertices[0].z;
-    for (Vec4 vertex: obj.vertices){
-        maxX = fmaxf(maxX, vertex.x);
-        minX = fminf(minX, vertex.x);
-        maxY = fmaxf(maxY, vertex.y);
-        minY = fminf(minY, vertex.y);
-        maxZ = fmaxf(maxZ, vertex.z);
-        minZ = fminf(minZ, vertex.z);
-    }
-    float dx = maxX - minX;
-    float dy = maxY - minY;
-    float dz = maxZ - minZ;
-    float diagonal = sqrt(dx*dx + dy*dy + dz*dz);
-    float screenDiagonal = sqrt(WINDOW_WIDTH * WINDOW_WIDTH + WINDOW_HEIGHT * WINDOW_HEIGHT);
-    obj.scale = screenDiagonal / diagonal * 0.9f;
-    std::array <float, 3> center = {
-        minX + dx / 2,
-        minY + dy / 2,
-        minZ + dz / 2
-    };
-    //Translate vertices to center
-    for (Vec4 &vertex : obj.vertices) {
-        vertex.x -= center[0];
-        vertex.y -= center[1];
-        vertex.z -= center[2];
-    }
-    obj.base = {
-        {0.0f},
-        {0.0f},
-        {0.0f}
-    };
-    obj.angles = {0.0f, 0.0f, 0.0f};
-}
+__device__ Vec4 canonicalToFullCoords(Vec4 homoCoord3d, utilities::viewVolume viewVolume);
 
-void initCamera(utilities::camera &cam, const utilities::viewVolume viewVol)
-{
-    cam.base = {
-        {0.0f},
-        {0.0f},
-        {0.0f}
-    };
-    cam.angles = {0.0f, 0.0f, 0.0f};
-    cam.viewVolume = viewVol;
-}
+__device__ Vec4 cartToCanvasCoords(Vec4 homoCoord3d);
 
-void initLight(utilities::light &light)
-{
-    light.base = {
-        {0.0f},
-        {0.0f},
-        {0.0f}
-    };
-    light.angles = {0.0f, 0.0f, 0.0f};
-}
+// __device__ Vec4 canvasToCartCoords(Vec4 homoCoord3d);
 
+__host__ __device__ Vec4 translateCoord(Vec4 homoCoord3d, float3 translate);
 
-void updateAngles(float3* angles, float3 rotate){
-    angles->x += rotate.x;
-    angles->y += rotate.y;
-    angles->z += rotate.z;
-    // Normalize angles to [0, 2*PI)
-    angles->x = fmod(angles->x, PI * 2);
-    angles->y = fmod(angles->y, PI * 2);
-    angles->z = fmod(angles->z, PI * 2);
+__host__ __device__ Vec4 rotateCoord(Vec4 homoCoord3d, float3 rotate);
 
-}
+__device__ Vec4 scaleCoord(Vec4 homoCoord3d, float scale);
+
+__host__ __device__ void moveCamera(utilities::camera* camera, float3 translate, float3 rotate);
+
+__device__ Vec4 modelToWorld(Vec4 homoCoord3d, float scale, float3 angles, Vec3 base);
+
+__device__ Vec4 worldToCamera(Vec4 homoCoord3d, float3 angles, Vec3 base);
+
+__device__ Vec4 orthographicProjectCoord(Vec4 homoCoord3d, utilities::viewVolume viewVolume);
+
+__device__ Vec4 perspectiveProjectCoord(Vec4 homoCoord3d, utilities::viewVolume viewVolume);
+
+__host__ __device__ float2 getBarycentric(Vec4* triangle, float2 point);
+
+__host__ __device__ bool isValidBarycentric(float2 barycentric);
+
+__host__ __device__ float getDepth(Vec4* triangle, float2 barycentric);
+
+__host__ __device__ Color getColor(float2 barycentric, Color* colors);
+
+__host__ __device__ utilities::boundingBox getBoundingBox(Vec4* triangle);
+
+__host__ __device__ void updateAngles(float3* angles, float3 rotate);
+
+__global__ void transformVerticesToCamKernel(
+     Vec4* d_transformedVertices, int numVertices, float3 d_objAngles, Vec3 d_objBase,
+    utilities::camera d_camera, float scale );
+
+__global__ void transformCamToCanvasKernel(
+    Vec4* d_transformedVertices, int numVertices, float3 offsetVector, bool perspective,
+    utilities::viewVolume d_viewVol);

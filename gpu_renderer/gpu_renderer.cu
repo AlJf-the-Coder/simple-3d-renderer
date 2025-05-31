@@ -5,10 +5,11 @@
 #include <SDL3/SDL_surface.h>
 #include <SDL3/SDL_video.h>
 #include <thrust/device_vector.h>
-#include <thrust/reduce.h>
+#include <thrust/transform_reduce.h>
 #include <iomanip>
-#include "gpu_kernels.cu"
-#include "gpu_rasterizer.h"
+#include "gpu_utilities.h"
+
+using namespace std;
 
 #define CUDA_CHECK(ans) { gpuAssert((ans), __FILE__, __LINE__); }
 inline void gpuAssert(cudaError_t code, const char *file, int line)
@@ -20,11 +21,9 @@ inline void gpuAssert(cudaError_t code, const char *file, int line)
     }
 }
 
-using namespace std;
 
 static SDL_Window *window = NULL;
 static SDL_Renderer *renderer = NULL;
-static double averageTime = 0;
 static double totalTime = 0;
 static Uint64 totalPixels = 0;
 static Uint64 lastTime = 0;
@@ -34,8 +33,9 @@ FrameBuffer frameBuffer;
 DepthBuffer depthBuffer;
 utilities::camera camera;
 utilities::object obj;
+const Color bgColor = make_uchar3(0, 0, 0); // Background color
 
-frameBuffer d_frameBuffer;
+FrameBuffer d_frameBuffer;
 DepthBuffer d_depthBuffer;
 Vec4* d_vertices;
 Vec4* d_transformedVertices;
@@ -43,40 +43,37 @@ int* d_faces;
 Color* d_colors;
 
 
-void initBuffers(FrameBuffer* &frameBuffer, DepthBuffer* &depthBuffer, const uchar3 clearColor) {
+void initBuffers(FrameBuffer &frameBuffer, DepthBuffer &depthBuffer) {
     frameBuffer = new uint8_t[WINDOW_WIDTH * WINDOW_HEIGHT * 3];
     depthBuffer = new float[WINDOW_WIDTH * WINDOW_HEIGHT];
-    for (int i = 0; i < WINDOW_WIDTH * WINDOW_HEIGHT; ++i) {
-        frameBuffer[i * 3] = clearColor.x;
-        frameBuffer[i * 3 + 1] = clearColor.y;
-        frameBuffer[i * 3 + 2] = clearColor.z;
+    for (int i = 0; i < WINDOW_WIDTH * WINDOW_HEIGHT; i++) {
+        int frameBufferBase = i * 3;
+        frameBuffer[frameBufferBase] = bgColor.x;
+        frameBuffer[frameBufferBase + 1] = bgColor.y;
+        frameBuffer[frameBufferBase + 2] = bgColor.z;
         depthBuffer[i] = 1.0f; // Initialize depth buffer to maximum depth
     }
 }
 
-void resetBuffers(std::array<uint8_t, 3> color) {
-    for (int i = 0; i < WINDOW_HEIGHT; i++)
-    {
-        for (int j = 0; j < WINDOW_WIDTH; j++)
-        {
-            int index = i * (WINDOW_WIDTH + j)
-            int frameBufferBase = 3 * index;
-            frameBuffer[frameBufferBase + 0] = color[0];
-            frameBuffer[frameBufferBase + 1] = color[1];
-            frameBuffer[frameBufferBase + 2] = color[2];
-            depthBuffer[index] = 1.0f;
-        }
+void resetBuffers() {
+    for (int i = 0; i < WINDOW_WIDTH * WINDOW_HEIGHT; i++) {
+        int frameBufferBase = i * 3;
+        frameBuffer[frameBufferBase] = bgColor.x;
+        frameBuffer[frameBufferBase + 1] = bgColor.y;
+        frameBuffer[frameBufferBase + 2] = bgColor.z;
+        depthBuffer[index] = 1.0f;
     }
 }
 
+/*
 void drawWireframe(vector<Vec4> canvasCoords, uchar3 strokeColor) {
     auto [r,g,b] = strokeColor;
     SDL_SetRenderDrawColor(renderer, r, g, b, SDL_ALPHA_OPAQUE);
-    for (array<int, 3> polygon: obj.faces){
+    for (int i=0 i < obj.faces.size(), i+=3){
         // strokeWeight(4);
-        for (int i=0; i<polygon.size(); i++){
-        vector<float> point1 = flatten_vector(canvasCoords[polygon[i] - 1]);
-        vector<float> point2 = flatten_vector(canvasCoords[polygon[(i + 1) % polygon.size()] - 1]);
+        for (int j=0; j<polygon.size(); j++){
+        vector<float> point1 = flatten_vector(canvasCoords[polygon[j] - 1]);
+        vector<float> point2 = flatten_vector(canvasCoords[polygon[(j + 1) % polygon.size()] - 1]);
         SDL_RenderLine(renderer, point1[0], point1[1], point2[0], point2[1]);
         }
         // strokeWeight(10);
@@ -87,6 +84,7 @@ void drawWireframe(vector<Vec4> canvasCoords, uchar3 strokeColor) {
         SDL_RenderPoint(renderer, point[0], point[1]);
     }
 }
+*/
 
 int scanlineRender(Vec4* triangle, Color* triColors) {
 
@@ -100,7 +98,7 @@ int scanlineRender(Vec4* triangle, Color* triColors) {
         return 0;
     }
 
-    utilities:boundingBox bBox = getBoundingBox(triangle);
+    utilities::boundingBox bBox = getBoundingBox(triangle);
     float minX = max(0, (int) floor(bBox.minX));
     float minY = max(0, (int) floor(bBox.minY));
     float maxX = min(WINDOW_WIDTH - 1, (int) floor(bBox.maxX));
@@ -149,12 +147,13 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char *argv[])
     SDL_Log("Initializing\n");
 
     float near = WINDOW_WIDTH;
-    initCamera(camera, {near, near + WINDOW_WIDTH, -WINDOW_WIDTH/2, WINDOW_WIDTH/2, WINDOW_HEIGHT/2, -WINDOW_HEIGHT/2});
+    utilities::initCamera(camera, {near, near + WINDOW_WIDTH, -WINDOW_WIDTH/2, WINDOW_WIDTH/2, WINDOW_HEIGHT/2, -WINDOW_HEIGHT/2});
+    initBuffers(frameBuffer, depthBuffer);
     try{
         if (argc == 1)
-            loadObject("../../../models/cube.obj", obj);
+            utilities::loadObject("../../../models/cube.obj", obj);
         else
-            loadObject(argv[1], obj);
+            utilities::loadObject(argv[1], obj);
     }
     catch (const std::exception &e) {
         cerr << "Error loading object: " << e.what() << endl;
@@ -162,7 +161,7 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char *argv[])
     }
 
     cerr << "Loaded object" << "\n";
-    cout << "Object has " << obj.vertices.size() << " vertices and " << obj.faces.size() << " faces" << endl;
+    cout << "Object has " << obj.vertices.size() << " vertices and " << obj.faces.size() / 3 << " faces" << endl;
 
     SDL_SetAppMetadata("Simple 3D Renderer", "1.0", "com.example.renderer-points");
 
@@ -201,31 +200,36 @@ SDL_AppResult SDL_AppEvent(void *appstate, SDL_Event *event)
 SDL_AppResult SDL_AppIterate(void *appstate)
 {
     lastTime = SDL_GetPerformanceCounter();
-    resetBuffers({0, 255, 255});  /* clear the frame buffer. */
+    resetBuffers();  /* clear the frame buffer. */
     float scale = obj.scale;
     
     int numVertices = obj.vertices.size();
     int numFaces = obj.faces.size() / 3; // Each face is a triangle
 
-    cudaMemcpy(d_transformedVertices, d_vertices, numVertices * sizeof(Vec4), cudaMemcpyDeviceToDevice);
+    CUDA_CHECK(cudaMemcpy(d_transformedVertices, d_vertices, numVertices * sizeof(Vec4), cudaMemcpyDeviceToDevice));
     int vertexThreadsPerBlock = min(numVertices, 1024);
     int blocks = (numVertices + vertexThreadsPerBlock - 1) / vertexThreadsPerBlock;
 
     transformVerticesToCamKernel<<<blocks, vertexThreadsPerBlock>>>(
-        d_transformedVertices, numVertices, objAngles, objBase, camera, scale);
-    cudaDeviceSynchronize(); 
+        d_transformedVertices, numVertices, obj.angles, obj.base, camera, scale);
+    CUDA_CHECK(cudaDeviceSynchronize()); 
 
-    thrust::device_ptr<Vec4> d_vertices_ptr(d_vertices);
-    auto z_accessor_it = thrust::make_transform_iterator(d_vertices_ptr, ExtractZ());
-    auto min_z_it = thrust::min_element(z_accessor_it, z_accessor_it + numVertices);
-    float minZ = *min_z_it;
+    // auto z_accessor_it = thrust::make_transform_iterator(d_vertices_ptr, ExtractZ());
+    // auto min_z_it = thrust::min_element(z_accessor_it, z_accessor_it + numVertices);
+    // float minZ = *min_z_it;
+
+    minZUnary unary_op;
+    minZBinary binary_op;
+    thrust::device_ptr<Vec4> d_verticesPtr(d_transformedVertices);
+    float init = unary_op(d_verticesPtr[0]);
+    float minZ = thrust::transform_reduce(d_verticesPtr, d_verticesPtr + numVertices, unary_op, init, binary_op);
 
     float offsetZ = camera.viewVolume.N - minZ;
     float3 offsetVec = make_float3(0.0f, 0.0f, offsetZ);
 
     transformCamToCanvasKernel<<<blocks, vertexThreadsPerBlock>>>(
-        d_transformedVertices, numVertices, offsetVec, camera.viewVolume);
-    cudaDeviceSynchronize();
+        d_transformedVertices, numVertices, offsetVec, true, camera.viewVolume);
+    CUDA_CHECK(cudaDeviceSynchronize());
 
     float3 objRotate = make_float3(-0.03f, 0.0f, -0.053f);
     updateAngles(&obj.angles, objRotate);
@@ -246,7 +250,7 @@ SDL_AppResult SDL_AppIterate(void *appstate)
     //save the frame
     SDL_Surface* surface = SDL_CreateSurfaceFrom(
         WINDOW_WIDTH, WINDOW_HEIGHT,
-        SDL_PIXELFORMAT_RGB24, frameBuffer.data(), WINDOW_WIDTH * 3 
+        SDL_PIXELFORMAT_RGB24, frameBuffer, WINDOW_WIDTH * 3 
     );
     if (surface == NULL) {
         cerr << "Couldn't read pixels from renderer: " << SDL_GetError() << endl;
@@ -294,6 +298,14 @@ SDL_AppResult SDL_AppIterate(void *appstate)
         cout << "Average pixels per frame: " << std::fixed << std::setprecision(4) << (float) totalPixels / frameNum << endl;
         cout << "Average processing time: " << std::fixed << std::setprecision(4) << frameTime << endl;
         cout << "Frame rate: " << std::fixed << std::setprecision(4) << (1.0 / (frameTime / 1000)) << endl;
+        CUDA_CHECK(cudaFree(d_frameBuffer))
+        CUDA_CHECK(cudaFree(d_depthBuffer))
+        CUDA_CHECK(cudaFree(d_vertices))
+        CUDA_CHECK(cudaFree(d_transformedVertices))
+        CUDA_CHECK(cudaFree(d_faces))
+        CUDA_CHECK(cudaFree(d_colors))
+        delete[] frameBuffer;
+        delete[] depthBuffer;
         return SDL_APP_SUCCESS;  /* end the program, reporting success to the OS. */
     }
     return SDL_APP_CONTINUE;  /* carry on with the program! */
