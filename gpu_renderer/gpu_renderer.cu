@@ -25,7 +25,7 @@ inline void gpuAssert(cudaError_t code, const char *file, int line)
 static SDL_Window *window = NULL;
 static SDL_Renderer *renderer = NULL;
 static double totalTime = 0;
-static Uint64 totalPixels = 0;
+// static Uint64 totalPixels = 0;
 static Uint64 lastTime = 0;
 static Uint64 frameNum = 0;
 
@@ -33,7 +33,7 @@ FrameBuffer frameBuffer;
 DepthBuffer depthBuffer;
 utilities::camera camera;
 utilities::object obj;
-const Color bgColor = make_uchar3(0, 0, 0); // Background color
+const Color bgColor = make_uchar3(16, 110, 190); // Background color
 
 FrameBuffer d_frameBuffer;
 DepthBuffer d_depthBuffer;
@@ -61,7 +61,7 @@ void resetBuffers() {
         frameBuffer[frameBufferBase] = bgColor.x;
         frameBuffer[frameBufferBase + 1] = bgColor.y;
         frameBuffer[frameBufferBase + 2] = bgColor.z;
-        depthBuffer[index] = 1.0f;
+        depthBuffer[i] = 1.0f;
     }
 }
 
@@ -86,16 +86,17 @@ void drawWireframe(vector<Vec4> canvasCoords, uchar3 strokeColor) {
 }
 */
 
-int scanlineRender(Vec4* triangle, Color* triColors) {
+void scanlineRender(Vec4* triangle, Color* triColors) {
 
-    // skip degenerate triangles
     float mat[2][2] = {
         {triangle[1].x - triangle[0].x, triangle[2].x - triangle[0].x},
         {triangle[1].y - triangle[0].y, triangle[2].y - triangle[0].y}
     };
     float det = mat[0][0] * mat[1][1] - mat[0][1] * mat[1][0];
+    // skip degenerate triangles
     if (det == 0) {
-        return 0;
+        return;
+        // return 0;
     }
 
     utilities::boundingBox bBox = getBoundingBox(triangle);
@@ -104,10 +105,10 @@ int scanlineRender(Vec4* triangle, Color* triColors) {
     float maxX = min(WINDOW_WIDTH - 1, (int) floor(bBox.maxX));
     float maxY = min(WINDOW_HEIGHT- 1, (int) floor(bBox.maxY));
 
-    int triPixels = 0;
+    // int triPixels = 0;
     for (int y=minY; y <= maxY; y++){
         for (int x=minX; x <= maxX; x++){
-            triPixels += 1;
+            // triPixels += 1;
             float2 point = make_float2(x + 0.5f, y + 0.5f);
             float2 barycentric = getBarycentric(triangle, point);
             if (isValidBarycentric(barycentric)){
@@ -124,11 +125,11 @@ int scanlineRender(Vec4* triangle, Color* triColors) {
             }
         }
     }
-    return triPixels;
+    // return triPixels;
 }
 
-int rasterize(vector<Vec4> canvasCoords, utilities::object object) {
-    int modelPixels = 0;
+void rasterize(vector<Vec4> canvasCoords, utilities::object object) {
+    // int modelPixels = 0;
     for (int i = 0; i < object.faces.size(); i+=3){
         Color triColors[3];
         Vec4 mappedTriangle[3];
@@ -136,9 +137,55 @@ int rasterize(vector<Vec4> canvasCoords, utilities::object object) {
             triColors[j] = object.colors[i + j];
             mappedTriangle[j] = canvasCoords[object.faces[i + j] - 1];
         }
-        modelPixels += scanlineRender(mappedTriangle, triColors);
+        // modelPixels += scanlineRender(mappedTriangle, triColors);
+        scanlineRender(mappedTriangle, triColors);
     }
-    return modelPixels;
+    // return modelPixels;
+}
+
+vector<Vec4> transformObjectCoordinates(utilities::object &obj, float3 angles, bool perspective) {
+
+    vector<Vec4> transformedCoords;
+    transformedCoords.reserve(obj.vertices.size());
+    for (Vec4 coord : obj.vertices){
+        transformedCoords.push_back(modelToWorld(coord, obj.scale, obj.angles, obj.base));
+    }
+
+    for (Vec4& t: transformedCoords){
+        t = worldToCamera(t, camera.angles, camera.base);
+    }
+
+    float near = camera.viewVolume.N;
+    float minZ = transformedCoords[0].z;
+    for (Vec4 t: transformedCoords){
+        minZ = fminf(minZ, t.z);
+    }
+
+    float3 offsetVector = make_float3(0.0f, 0.0f, near - minZ);
+
+    for (Vec4& t: transformedCoords){
+        t = translateCoord(t, offsetVector);
+    }
+
+    if (perspective){
+        for (Vec4& t: transformedCoords){
+            t = perspectiveProjectCoord(t, camera.viewVolume);
+        }
+    } else {
+        for (Vec4& t: transformedCoords){
+            t = orthographicProjectCoord(t, camera.viewVolume);
+        }
+    }
+
+    for (Vec4& t: transformedCoords){
+        t = canonicalToFullCoords(t, camera.viewVolume);
+    }
+
+    for (Vec4& t: transformedCoords){
+        t = cartToCanvasCoords(t);
+    }
+
+    return transformedCoords;
 }
 
 /* This function runs once at startup. */
@@ -210,13 +257,10 @@ SDL_AppResult SDL_AppIterate(void *appstate)
     int vertexThreadsPerBlock = min(numVertices, 1024);
     int blocks = (numVertices + vertexThreadsPerBlock - 1) / vertexThreadsPerBlock;
 
+    // Mat4 modelToCamMat = matrixMultiply()
     transformVerticesToCamKernel<<<blocks, vertexThreadsPerBlock>>>(
         d_transformedVertices, numVertices, obj.angles, obj.base, camera, scale);
     CUDA_CHECK(cudaDeviceSynchronize()); 
-
-    // auto z_accessor_it = thrust::make_transform_iterator(d_vertices_ptr, ExtractZ());
-    // auto min_z_it = thrust::min_element(z_accessor_it, z_accessor_it + numVertices);
-    // float minZ = *min_z_it;
 
     minZUnary unary_op;
     minZBinary binary_op;
@@ -229,23 +273,27 @@ SDL_AppResult SDL_AppIterate(void *appstate)
 
     transformCamToCanvasKernel<<<blocks, vertexThreadsPerBlock>>>(
         d_transformedVertices, numVertices, offsetVec, true, camera.viewVolume);
-    CUDA_CHECK(cudaDeviceSynchronize());
+    CUDA_CHECK(cudaDeviceSynchronize()); 
 
     float3 objRotate = make_float3(-0.03f, 0.0f, -0.053f);
     updateAngles(&obj.angles, objRotate);
 
 
-    int faceThreadsPerBlock = min(numVertices, 1024);
+    //rasterize the object
+    dim3 blockDim(32, 32); //1024 threads per block
+    dim3 gridDim(
+        (WINDOW_WIDTH + blockDim.x - 1) / blockDim.x, 
+        (WINDOW_HEIGHT + blockDim.y - 1) / blockDim.y
+    );
     
-    // Remove after making rasterizer kernel
-    vector<Vec4> canvasCoords(numVertices);
-    cudaMemcpy(canvasCoords.data(), d_transformedVertices, numVertices * sizeof(Vec4), cudaMemcpyDeviceToHost);
-    const int pixelCount = rasterize(canvasCoords, obj);
-    // drawWireframe(canvasCoords, {0, 255, 0});
+    rasterizeKernel<<<gridDim, blockDim>>>(
+        d_transformedVertices, d_faces, d_colors, 
+        d_frameBuffer, d_depthBuffer, numFaces, 
+        bgColor);
 
     // copy data back to Host
-    // cudaMemcpy(frameBuffer.data(), d_frameBuffer, WINDOW_WIDTH * WINDOW_HEIGHT * sizeof(Color), cudaMemcpyDeviceToHost);
-
+    CUDA_CHECK(cudaDeviceSynchronize());
+    cudaMemcpy(frameBuffer, d_frameBuffer, 3 * WINDOW_WIDTH * WINDOW_HEIGHT * sizeof(uint8_t), cudaMemcpyDeviceToHost);
 
     //save the frame
     SDL_Surface* surface = SDL_CreateSurfaceFrom(
@@ -283,19 +331,19 @@ SDL_AppResult SDL_AppIterate(void *appstate)
     const Uint64 now = SDL_GetPerformanceCounter();
     const double elapsed = ((double) (now - lastTime) / SDL_GetPerformanceFrequency()) * 1000;  /* seconds since last iteration */
     totalTime += elapsed;
-    totalPixels += pixelCount;
+    // totalPixels += pixelCount;
 
 
     cout << "frameNum: " << frameNum << " "
-     << "time: " << elapsed << " " 
-     << "pixels: " << pixelCount << endl;
+     << "time: " << elapsed << endl;
+    //  << "pixels: " << pixelCount << endl;
     frameNum++;
 
     if (frameNum >= 120) {
         double frameTime = totalTime / frameNum;
         cout << "Total time: " << totalTime << endl;
         cout << "Exiting after " << frameNum << " frames" << endl;
-        cout << "Average pixels per frame: " << std::fixed << std::setprecision(4) << (float) totalPixels / frameNum << endl;
+        // cout << "Average pixels per frame: " << std::fixed << std::setprecision(4) << (float) totalPixels / frameNum << endl;
         cout << "Average processing time: " << std::fixed << std::setprecision(4) << frameTime << endl;
         cout << "Frame rate: " << std::fixed << std::setprecision(4) << (1.0 / (frameTime / 1000)) << endl;
         CUDA_CHECK(cudaFree(d_frameBuffer))

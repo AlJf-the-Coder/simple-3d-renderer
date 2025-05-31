@@ -44,19 +44,11 @@ struct minZBinary {
 
 namespace utilities{
     struct boundingBox {
-        float minX, maxX, 
-        minY, maxY, 
-        minZ, maxZ;
+        float minX, maxX, minY, maxY;
     };
 
-    struct viewVolume
-    {
-        float N;
-        float F;
-        float L;
-        float R;
-        float T;
-        float B;
+    struct viewVolume {
+        float N, F, L, R, T, B;
     };
 
     struct camera 
@@ -83,18 +75,18 @@ namespace utilities{
 
     void loadObject(const char *filename, object &obj);
 
-    void initCamera(utilities::camera &cam, const utilities::viewVolume &viewVol)
+    void initCamera(utilities::camera &cam, const utilities::viewVolume &viewVol);
 
-    void initLight(utilities::light &light)
+    void initLight(utilities::light &light);
 }
 
 __host__ __device__ Vec4 vectorMultiply(const Mat4 a, const Vec4 b);
 
-__device__ Mat4 matrixMultiply(const Mat4 a, const Mat4 b);
+__host__ __device__ Mat4 matrixMultiply(const Mat4 a, const Mat4 b);
 
-__device__ Vec4 canonicalToFullCoords(Vec4 homoCoord3d, utilities::viewVolume viewVolume);
+__host__ __device__ Vec4 canonicalToFullCoords(Vec4 homoCoord3d, utilities::viewVolume viewVolume);
 
-__device__ Vec4 cartToCanvasCoords(Vec4 homoCoord3d);
+__host__ __device__ Vec4 cartToCanvasCoords(Vec4 homoCoord3d);
 
 // __device__ Vec4 canvasToCartCoords(Vec4 homoCoord3d);
 
@@ -102,17 +94,17 @@ __host__ __device__ Vec4 translateCoord(Vec4 homoCoord3d, float3 translate);
 
 __host__ __device__ Vec4 rotateCoord(Vec4 homoCoord3d, float3 rotate);
 
-__device__ Vec4 scaleCoord(Vec4 homoCoord3d, float scale);
+__host__ __device__ Vec4 scaleCoord(Vec4 homoCoord3d, float scale);
 
 __host__ __device__ void moveCamera(utilities::camera* camera, float3 translate, float3 rotate);
 
-__device__ Vec4 modelToWorld(Vec4 homoCoord3d, float scale, float3 angles, Vec3 base);
+__host__ __device__ Vec4 modelToWorld(Vec4 homoCoord3d, float scale, float3 angles, Vec3 base);
 
-__device__ Vec4 worldToCamera(Vec4 homoCoord3d, float3 angles, Vec3 base);
+__host__ __device__ Vec4 worldToCamera(Vec4 homoCoord3d, float3 angles, Vec3 base);
 
-__device__ Vec4 orthographicProjectCoord(Vec4 homoCoord3d, utilities::viewVolume viewVolume);
+__host__ __device__ Vec4 orthographicProjectCoord(Vec4 homoCoord3d, utilities::viewVolume viewVolume);
 
-__device__ Vec4 perspectiveProjectCoord(Vec4 homoCoord3d, utilities::viewVolume viewVolume);
+__host__ __device__ Vec4 perspectiveProjectCoord(Vec4 homoCoord3d, utilities::viewVolume viewVolume);
 
 __host__ __device__ float2 getBarycentric(Vec4* triangle, float2 point);
 
@@ -133,3 +125,13 @@ __global__ void transformVerticesToCamKernel(
 __global__ void transformCamToCanvasKernel(
     Vec4* d_transformedVertices, int numVertices, float3 offsetVector, bool perspective,
     utilities::viewVolume d_viewVol);
+
+__global__ void rasterizeKernel(
+    const Vec4* d_transformedVertices, // canvas coordinates 
+    const int* d_faces,               
+    const Color* d_face_colors,      
+    uint8_t* d_frameBuffer,            
+    float* d_depthBuffer,              
+    int numFaces,
+    Color bgColor
+); 
