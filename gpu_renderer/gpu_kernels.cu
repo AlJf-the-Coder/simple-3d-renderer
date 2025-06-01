@@ -22,7 +22,7 @@ __host__ __device__ Mat4 matrixMultiply(const Mat4 a, const Mat4 b)
     return resultMat;
 }
 
-__host__ __device__ Vec4 canonicalToFullCoords(Vec4 homoCoord3d, utilities::viewVolume viewVolume) {
+__host__ __device__ Mat4 getCanonicalToFullMatrix(utilities::viewVolume viewVolume) {
     const float L = viewVolume.L;
     const float R = viewVolume.R;
     const float T = viewVolume.T;
@@ -34,11 +34,10 @@ __host__ __device__ Vec4 canonicalToFullCoords(Vec4 homoCoord3d, utilities::view
     mat.rows[2] = make_float4(0, 0, 1, 0);
     mat.rows[3] = make_float4(0, 0, 0, 1);
 
-    return vectorMultiply(mat, homoCoord3d);
+    return mat;
 }
 
-__host__ __device__ Vec4 cartToCanvasCoords(Vec4 homoCoord3d)
-{
+__host__ __device__ Mat4 getCartToCanvasMatrix() {
     Mat4 mat1;
     mat1.rows[0] = make_float4(1, 0, 0, 0);
     mat1.rows[1] = make_float4(0, -1, 0, 0), 
@@ -50,10 +49,10 @@ __host__ __device__ Vec4 cartToCanvasCoords(Vec4 homoCoord3d)
     mat2.rows[1] = make_float4(0, 1, 0, WINDOW_HEIGHT/2);
     mat2.rows[2] = make_float4(0, 0, 1, 0);
     mat2.rows[3] = make_float4(0, 0, 0, 1);
-    return vectorMultiply(mat2, vectorMultiply(mat1, homoCoord3d));
+    return matrixMultiply(mat2, mat1);
 }
 
-// __device__ Vec4 canvasToCartCoords(Vec4 homoCoord3d) {
+// __device__ Mat4 canvasToCartCoords(Vec4 homoCoord3d) {
 //     Mat4 mat1;
 //     mat1.rows[0] = make_float4(1, 0, 0, 0);
 //     mat1.rows[1] = make_float4(0, -1, 0, 0), 
@@ -66,10 +65,10 @@ __host__ __device__ Vec4 cartToCanvasCoords(Vec4 homoCoord3d)
 //     mat2.rows[2] = make_float4(0, 0, 1, 0);
 //     mat2.rows[3] = make_float4(0, 0, 0, 1);
 
-//     return vectorMultiply(mat2, vectorMultiply(mat1, homoCoord3d));
+    // return matrixMultiply(mat2, mat1);
 // }
 
-__host__ __device__ Vec4 translateCoord(Vec4 homoCoord3d, float3 translate) {
+__host__ __device__ Mat4 getTranslateMatrix(float3 translate) {
     float dx = translate.x;
     float dy = translate.y;
     float dz = translate.z;
@@ -80,10 +79,10 @@ __host__ __device__ Vec4 translateCoord(Vec4 homoCoord3d, float3 translate) {
     mat.rows[2] = make_float4(0, 0, 1, dz);
     mat.rows[3] = make_float4(0, 0, 0, 1);
 
-    return vectorMultiply(mat, homoCoord3d);
+    return mat;
 }
 
-__host__ __device__ Vec4 rotateCoord(Vec4 homoCoord3d, float3 rotate) {
+__host__ __device__ Mat4 getRotateMatrix(float3 rotate) {
     float rx = rotate.x;
     float ry = rotate.y;
     float rz = rotate.z;
@@ -105,49 +104,38 @@ __host__ __device__ Vec4 rotateCoord(Vec4 homoCoord3d, float3 rotate) {
     rotateMatZ.rows[2] = make_float4(0, 0, 1, 0); 
     rotateMatZ.rows[3] = make_float4(0, 0, 0, 1);
     
-    Vec4 newCoord = homoCoord3d;
-    newCoord = vectorMultiply(rotateMatX, newCoord);
-    newCoord = vectorMultiply(rotateMatY, newCoord);
-    newCoord = vectorMultiply(rotateMatZ, newCoord);
-    return newCoord;
+    return matrixMultiply(rotateMatZ, matrixMultiply(rotateMatY, rotateMatX));
 }
 
-__host__ __device__ Vec4 scaleCoord(Vec4 homoCoord3d, float scale) {
+__host__ __device__ Mat4 getScaleMatrix(float scale) {
     Mat4 mat;
     mat.rows[0] = make_float4(scale, 0, 0, 0);
     mat.rows[1] = make_float4(0, scale, 0, 0);
     mat.rows[2] = make_float4(0, 0, scale, 0);
     mat.rows[3] = make_float4(0, 0, 0, 1);
-    return vectorMultiply(mat, homoCoord3d);
+    return mat;
 }
 
 __host__ __device__ void moveCamera(utilities::camera* camera, float3 translate, float3 rotate){
+    Mat4 mat = matrixMultiply(getTranslateMatrix(translate), getRotateMatrix(rotate));
     Vec4 base = make_float4(camera->base.x, camera->base.y, camera->base.z, 1.0f);
-    base = translateCoord(base, translate);
-    base = rotateCoord(base, rotate);
+    base = vectorMultiply(mat, base);
     camera->base = make_float3(base.x, base.y, base.z);
     updateAngles(&(camera->angles), rotate);
 }
 
-__host__ __device__ Vec4 modelToWorld(Vec4 homoCoord3d, float scale, float3 angles, Vec3 base){
-    Vec4 worldCoord = homoCoord3d;
-    worldCoord = rotateCoord(worldCoord, angles);
-    worldCoord = translateCoord(worldCoord, base);
-    worldCoord = scaleCoord(worldCoord, scale);
-    return worldCoord;
+__host__ __device__ Mat4 getModelToWorldMatrix(float scale, float3 angles, Vec3 base){
+    return matrixMultiply(getTranslateMatrix(base), matrixMultiply(getRotateMatrix(angles), getScaleMatrix(scale)));
 }
 
-__host__ __device__ Vec4 worldToCamera(Vec4 homoCoord3d, float3 angles, Vec3 base){
+__host__ __device__ Mat4 getWorldToCameraMatrix(float3 angles, Vec3 base){
     //translate then rotate
     float3 negBase = make_float3(-base.x, -base.y, -base.z);
-    float3 negAngles = {-angles.x, -angles.y, -angles.z};
-    Vec4 camCoord = homoCoord3d;
-    camCoord = translateCoord(camCoord, negBase);
-    camCoord = rotateCoord(camCoord, negAngles);
-    return camCoord;
+    float3 negAngles = make_float3(-angles.x, -angles.y, -angles.z);
+    return matrixMultiply(getRotateMatrix(negAngles), getTranslateMatrix(negBase));
 }
 
-__host__ __device__ Vec4 orthographicProjectCoord(Vec4 homoCoord3d, utilities::viewVolume viewVolume) {
+__host__ __device__ Mat4 getOrthographicProjectMatrix(utilities::viewVolume viewVolume) {
     float N = viewVolume.N;
     float F = viewVolume.F;
     float L = viewVolume.L;
@@ -159,10 +147,10 @@ __host__ __device__ Vec4 orthographicProjectCoord(Vec4 homoCoord3d, utilities::v
     projectMat.rows[1] = make_float4(0, 2/(T-B), 0, 0);
     projectMat.rows[2] = make_float4(0, 0, 1/(F-N), -N/(F-N));
     projectMat.rows[3] = make_float4(0, 0, 0, 1);
-    return vectorMultiply(projectMat, homoCoord3d);
+    return projectMat;
 }
 
-__host__ __device__ Vec4 perspectiveProjectCoord(Vec4 homoCoord3d, utilities::viewVolume viewVolume) {
+__host__ __device__ Mat4 getPerspectiveProjectMatrix(utilities::viewVolume viewVolume) {
     float N = viewVolume.N;
     float F = viewVolume.F;
     float L = viewVolume.L;
@@ -175,15 +163,26 @@ __host__ __device__ Vec4 perspectiveProjectCoord(Vec4 homoCoord3d, utilities::vi
     projectMat.rows[2] = make_float4(0, 0, F/(F-N), -(F*N)/(F-N));
     projectMat.rows[3] = make_float4(0, 0, 1, 0);
 
-    Vec4 projectedCoord = vectorMultiply(projectMat, homoCoord3d);
+    return projectMat;
+}
 
-    float scale = projectedCoord.w;
-    Mat4 scaleMat;
-    scaleMat.rows[0] = make_float4(1/scale, 0, 0, 0);
-    scaleMat.rows[1] = make_float4(0, 1/scale, 0, 0);
-    scaleMat.rows[2] = make_float4(0, 0, 1/scale, 0);
-    scaleMat.rows[3] = make_float4(0, 0, 0, 1/scale);
-    return vectorMultiply(scaleMat, projectedCoord);
+__host__ __device__ Mat4 getModelToCameraMatrix(utilities::object &obj, utilities::camera &cam){
+    Mat4 mat = matrixMultiply(getWorldToCameraMatrix(cam.angles, cam.base), getModelToWorldMatrix(obj.scale, obj.angles, obj.base));
+    return mat;
+}
+
+__host__ __device__ Mat4 getCameraToProjectedMatrix(float3 offset, utilities::viewVolume viewVol, bool perspective){
+    Mat4 mat = getTranslateMatrix(offset);
+    if (perspective){
+        mat = matrixMultiply(getPerspectiveProjectMatrix(viewVol), mat);
+    } else {
+        mat = matrixMultiply(getOrthographicProjectMatrix(viewVol), mat);
+    }
+    return mat;
+}
+
+__host__ __device__ Mat4 getCanonToScreenMatrix(utilities::viewVolume viewVol){
+    return matrixMultiply(getCartToCanvasMatrix(), getCanonicalToFullMatrix(viewVol));
 }
 
 __host__ __device__ float2 getBarycentric(Vec4* triangle, float2 point){
@@ -246,40 +245,30 @@ __host__ __device__ utilities::boundingBox getBoundingBox(Vec4* triangle){
     return {minX, maxX, minY, maxY};
 }
 __global__ void transformVerticesToCamKernel(
-     Vec4* d_transformedVertices, int numVertices, float3 d_objAngles, Vec3 d_objBase,
-    utilities::camera d_camera, float scale )
+     Vec4* d_transformedVertices, int numVertices, Mat4 modelToCameraMatrix)
 {
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     if (idx >= numVertices) {
         return;
     }
-    Vec4 t = d_transformedVertices[idx];
-    t = modelToWorld(t, scale, d_objAngles, d_objBase);
-    t = worldToCamera(t, d_camera.angles, d_camera.base);
-    d_transformedVertices[idx] = t;
+    d_transformedVertices[idx] = vectorMultiply(modelToCameraMatrix, d_transformedVertices[idx]);
 }
 
 __global__ void transformCamToCanvasKernel(
-    Vec4* d_transformedVertices, int numVertices, float3 offsetVector, bool perspective,
-    utilities::viewVolume d_viewVol)
+    Vec4* d_transformedVertices, int numVertices, Mat4 camToProjectMatrix, Mat4 canonToScreenMatrix)
 {
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     if (idx >= numVertices) {
         return;
     }
     Vec4 t = d_transformedVertices[idx];
-    t = translateCoord(t, offsetVector);
-    if (perspective) {
-        t = perspectiveProjectCoord(t, d_viewVol);
-    }
-    else {
-        t = orthographicProjectCoord(t, d_viewVol);
-    }
-    t = canonicalToFullCoords(t, d_viewVol);
-    t = cartToCanvasCoords(t);
-    d_transformedVertices[idx] = t;
+    t = vectorMultiply(camToProjectMatrix, t);
+    t.x = t.x / t.w;
+    t.y = t.y / t.w;
+    t.z = t.z / t.w;
+    t.w = t.w / t.w;
+    d_transformedVertices[idx] = vectorMultiply(canonToScreenMatrix, t);
 }
-
 
 __global__ void rasterizeKernel(
     const Vec4* d_transformedVertices, // canvas coordinates 
@@ -313,10 +302,10 @@ __global__ void rasterizeKernel(
         triangle[2] = d_transformedVertices[d_faces[base_idx + 2] - 1];
 
         utilities::boundingBox bBox = getBoundingBox(triangle);
-        float minX = bBox.minX;
-        float maxX = bBox.maxX;
-        float minY = bBox.minY;
-        float maxY = bBox.maxY;
+        float minX = floor(bBox.minX);
+        float minY = floor(bBox.minY);
+        float maxX = ceil(bBox.maxX);
+        float maxY = ceil(bBox.maxY);
 
         if (x < minX|| x > maxX|| y < minY|| y > maxY) {
             continue; 
@@ -351,3 +340,64 @@ __global__ void rasterizeKernel(
     }
     d_depthBuffer[index] = currentDepth;
 }
+
+/*
+__global__ void rasterizeTriangleKernel(
+    const Vec4* d_transformedVertices, // canvas coordinates 
+    const int* d_faces,               
+    const Color* d_face_colors,      
+    uint8_t* d_frameBuffer,            
+    float* d_depthBuffer,              
+    int numFaces,
+    Color bgColor
+) {
+    // Each thread represents a face of the mesh
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx >= numFaces) {
+        return; 
+    }
+
+    int base_idx = idx * 3;
+    Vec4 triangle[3];
+    triangle[0] = d_transformedVertices[d_faces[base_idx] - 1];
+    triangle[1] = d_transformedVertices[d_faces[base_idx + 1] - 1];
+    triangle[2] = d_transformedVertices[d_faces[base_idx + 2] - 1];
+
+    utilities::boundingBox bBox = getBoundingBox(triangle);
+    int minX = max(0, (int) floor(bBox.minX));
+    int minY = max(0, (int) floor(bBox.minY));
+    int maxX = min(WINDOW_WIDTH - 1, (int) floor(bBox.maxX));
+    int maxY = min(WINDOW_HEIGHT- 1, (int) floor(bBox.maxY));
+
+    for (int y = minY; y <= maxY; y++) {
+        for (int x = minX; x <= maxX; x++) {
+            float2 pixelCenter = make_float2(x + 0.5f, y + 0.5f); 
+            float2 bary = getBarycentric(triangle, pixelCenter);
+            if (isValidBarycentric(bary)) {
+                float pointDepth = getDepth(triangle, bary);
+                if (pointDepth >= 0.0f && pointDepth <= 1.0f) { 
+                    int index = y * WINDOW_WIDTH + x;
+                    float currentDepth = atomicExch(d_depthBuffer[index], pointDepth);
+                    if (pointDepth < currentDepth) { 
+                        Color triColor[3];
+                        triColor[0] = d_face_colors[base_idx];
+                        triColor[1] = d_face_colors[base_idx + 1];
+                        triColor[2] = d_face_colors[base_idx + 2];
+                        Color currentColor = getColor(bary, triColor);
+                        int frameBufferBase = index * 3;
+                        d_frameBuffer[frameBufferBase] = (uint8_t)floorf((
+                            1.0f - pointDepth) * currentColor.x);
+                        d_frameBuffer[frameBufferBase + 1] = (uint8_t)floorf((
+                            1.0f - pointDepth) * currentColor.y);
+                        d_frameBuffer[frameBufferBase + 2] = (uint8_t)floorf((
+                            1.0f - pointDepth) * currentColor.z);
+                        d_depthBuffer[index] = pointDepth;
+                    } else {
+                        currentDepth = atomicExch(d_depthBuffer[index], currentDepth); 
+                    }
+                }
+            }
+        }
+    }
+}
+*/

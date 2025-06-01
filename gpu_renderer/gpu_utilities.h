@@ -84,27 +84,33 @@ __host__ __device__ Vec4 vectorMultiply(const Mat4 a, const Vec4 b);
 
 __host__ __device__ Mat4 matrixMultiply(const Mat4 a, const Mat4 b);
 
-__host__ __device__ Vec4 canonicalToFullCoords(Vec4 homoCoord3d, utilities::viewVolume viewVolume);
+__host__ __device__ Mat4 getCanonicalToFullMatrix(utilities::viewVolume viewVolume);
 
-__host__ __device__ Vec4 cartToCanvasCoords(Vec4 homoCoord3d);
+__host__ __device__ Mat4 getCartToCanvasMatrix();
 
-// __device__ Vec4 canvasToCartCoords(Vec4 homoCoord3d);
+// __device__ Mat4 getCanvasToCartMatrix();
 
-__host__ __device__ Vec4 translateCoord(Vec4 homoCoord3d, float3 translate);
+__host__ __device__ Mat4 getTranslateMatrix(float3 translate);
 
-__host__ __device__ Vec4 rotateCoord(Vec4 homoCoord3d, float3 rotate);
+__host__ __device__ Mat4 getRotateMatrix(float3 rotate);
 
-__host__ __device__ Vec4 scaleCoord(Vec4 homoCoord3d, float scale);
+__host__ __device__ Mat4 getScaleMatrix(float scale);
 
 __host__ __device__ void moveCamera(utilities::camera* camera, float3 translate, float3 rotate);
 
-__host__ __device__ Vec4 modelToWorld(Vec4 homoCoord3d, float scale, float3 angles, Vec3 base);
+__host__ __device__ Mat4 getModelToWorldMatrix(float scale, float3 angles, Vec3 base);
 
-__host__ __device__ Vec4 worldToCamera(Vec4 homoCoord3d, float3 angles, Vec3 base);
+__host__ __device__ Mat4 getWorldToCameraMatrix(float3 angles, Vec3 base);
 
-__host__ __device__ Vec4 orthographicProjectCoord(Vec4 homoCoord3d, utilities::viewVolume viewVolume);
+__host__ __device__ Mat4 getOrthographicProjectMatrix(utilities::viewVolume viewVolume);
 
-__host__ __device__ Vec4 perspectiveProjectCoord(Vec4 homoCoord3d, utilities::viewVolume viewVolume);
+__host__ __device__ Mat4 getPerspectiveProjectMatrix(utilities::viewVolume viewVolume);
+
+__host__ __device__ Mat4 getModelToCameraMatrix(utilities::object &obj, utilities::camera &cam);
+
+__host__ __device__ Mat4 getCameraToProjectedMatrix(float3 offset, utilities::viewVolume viewVol, bool perspective);
+
+__host__ __device__ Mat4 getCanonToScreenMatrix(utilities::viewVolume viewVol);
 
 __host__ __device__ float2 getBarycentric(Vec4* triangle, float2 point);
 
@@ -119,12 +125,12 @@ __host__ __device__ utilities::boundingBox getBoundingBox(Vec4* triangle);
 __host__ __device__ void updateAngles(float3* angles, float3 rotate);
 
 __global__ void transformVerticesToCamKernel(
-     Vec4* d_transformedVertices, int numVertices, float3 d_objAngles, Vec3 d_objBase,
-    utilities::camera d_camera, float scale );
+    Vec4* d_transformedVertices, int numVertices, 
+    Mat4 modelToCameraMatrix);
 
 __global__ void transformCamToCanvasKernel(
-    Vec4* d_transformedVertices, int numVertices, float3 offsetVector, bool perspective,
-    utilities::viewVolume d_viewVol);
+    Vec4* d_transformedVertices, int numVertices, 
+    Mat4 camToProjectMatrix, Mat4 canonToScreenMatrix);
 
 __global__ void rasterizeKernel(
     const Vec4* d_transformedVertices, // canvas coordinates 

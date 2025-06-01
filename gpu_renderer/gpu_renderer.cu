@@ -143,16 +143,14 @@ void rasterize(vector<Vec4> canvasCoords, utilities::object object) {
     // return modelPixels;
 }
 
-vector<Vec4> transformObjectCoordinates(utilities::object &obj, float3 angles, bool perspective) {
+vector<Vec4> transformObjectCoordinates(utilities::object &obj, utilities::camera &cam, bool perspective) {
 
     vector<Vec4> transformedCoords;
     transformedCoords.reserve(obj.vertices.size());
-    for (Vec4 coord : obj.vertices){
-        transformedCoords.push_back(modelToWorld(coord, obj.scale, obj.angles, obj.base));
-    }
 
-    for (Vec4& t: transformedCoords){
-        t = worldToCamera(t, camera.angles, camera.base);
+    Mat4 modelToCamMatrix = getModelToCameraMatrix(obj, cam);
+    for (Vec4 coord : obj.vertices){
+        transformedCoords.push_back(vectorMultiply(modelToCamMatrix, coord));
     }
 
     float near = camera.viewVolume.N;
@@ -160,29 +158,17 @@ vector<Vec4> transformObjectCoordinates(utilities::object &obj, float3 angles, b
     for (Vec4 t: transformedCoords){
         minZ = fminf(minZ, t.z);
     }
-
     float3 offsetVector = make_float3(0.0f, 0.0f, near - minZ);
 
+    Mat4 camToProjectMatrix = getCameraToProjectedMatrix(offsetVector, cam.viewVolume, perspective);
+    Mat4 canonToScreenMatrix = getCanonToScreenMatrix(cam.viewVolume);
     for (Vec4& t: transformedCoords){
-        t = translateCoord(t, offsetVector);
-    }
-
-    if (perspective){
-        for (Vec4& t: transformedCoords){
-            t = perspectiveProjectCoord(t, camera.viewVolume);
-        }
-    } else {
-        for (Vec4& t: transformedCoords){
-            t = orthographicProjectCoord(t, camera.viewVolume);
-        }
-    }
-
-    for (Vec4& t: transformedCoords){
-        t = canonicalToFullCoords(t, camera.viewVolume);
-    }
-
-    for (Vec4& t: transformedCoords){
-        t = cartToCanvasCoords(t);
+        t = vectorMultiply(camToProjectMatrix, t);
+        t.x = t.x / t.w;
+        t.y = t.y / t.w;
+        t.z = t.z / t.w;
+        t.w = 1.0f;
+        t = vectorMultiply(canonToScreenMatrix, t);
     }
 
     return transformedCoords;
@@ -248,18 +234,17 @@ SDL_AppResult SDL_AppIterate(void *appstate)
 {
     lastTime = SDL_GetPerformanceCounter();
     resetBuffers();  /* clear the frame buffer. */
-    float scale = obj.scale;
     
     int numVertices = obj.vertices.size();
     int numFaces = obj.faces.size() / 3; // Each face is a triangle
 
     CUDA_CHECK(cudaMemcpy(d_transformedVertices, d_vertices, numVertices * sizeof(Vec4), cudaMemcpyDeviceToDevice));
-    int vertexThreadsPerBlock = min(numVertices, 1024);
-    int blocks = (numVertices + vertexThreadsPerBlock - 1) / vertexThreadsPerBlock;
+    int numThreads = 256;
+    int numBlocks = (numVertices + numThreads - 1) / numThreads;
 
-    // Mat4 modelToCamMat = matrixMultiply()
-    transformVerticesToCamKernel<<<blocks, vertexThreadsPerBlock>>>(
-        d_transformedVertices, numVertices, obj.angles, obj.base, camera, scale);
+    Mat4 modelToCameraMatrix = getModelToCameraMatrix(obj, camera);
+    transformVerticesToCamKernel<<<numBlocks, numThreads>>>(
+        d_transformedVertices, numVertices, modelToCameraMatrix);
     CUDA_CHECK(cudaDeviceSynchronize()); 
 
     minZUnary unary_op;
@@ -271,22 +256,28 @@ SDL_AppResult SDL_AppIterate(void *appstate)
     float offsetZ = camera.viewVolume.N - minZ;
     float3 offsetVec = make_float3(0.0f, 0.0f, offsetZ);
 
-    transformCamToCanvasKernel<<<blocks, vertexThreadsPerBlock>>>(
-        d_transformedVertices, numVertices, offsetVec, true, camera.viewVolume);
-    CUDA_CHECK(cudaDeviceSynchronize()); 
+    Mat4 camToProjectMatrix = getCameraToProjectedMatrix(offsetVec, camera.viewVolume, true);
+    Mat4 canonToScreenMatrix = getCanonToScreenMatrix(camera.viewVolume);
+    transformCamToCanvasKernel<<<numBlocks, numThreads>>>(
+        d_transformedVertices, numVertices, camToProjectMatrix, canonToScreenMatrix);
 
     float3 objRotate = make_float3(-0.03f, 0.0f, -0.053f);
     updateAngles(&obj.angles, objRotate);
 
+    /*
+    vector<Vec4> canvasCoords(numVertices);
+    CUDA_CHECK(cudaMemcpy(canvasCoords.data(), d_transformedVertices, numVertices * sizeof(Vec4), cudaMemcpyDeviceToHost));
+    rasterize(canvasCoords, obj);
+    */
 
     //rasterize the object
-    dim3 blockDim(32, 32); //1024 threads per block
-    dim3 gridDim(
-        (WINDOW_WIDTH + blockDim.x - 1) / blockDim.x, 
-        (WINDOW_HEIGHT + blockDim.y - 1) / blockDim.y
+    dim3 threads(16, 16); //256 threads per block
+    dim3 blocks(
+        (WINDOW_WIDTH + threads.x - 1) / threads.x, 
+        (WINDOW_HEIGHT + threads.y - 1) / threads.y
     );
     
-    rasterizeKernel<<<gridDim, blockDim>>>(
+    rasterizeKernel<<<blocks, threads>>>(
         d_transformedVertices, d_faces, d_colors, 
         d_frameBuffer, d_depthBuffer, numFaces, 
         bgColor);
